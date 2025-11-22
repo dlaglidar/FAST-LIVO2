@@ -8,13 +8,22 @@
 	<node pkg="fast_livo" type="fastlivo_mapping" name="laserMapping" output="screen">
 		<rosparam file="$(find fast_livo)/config/camera_pinhole.yaml" />
 	</node>
-	
+
+	<!-- Static transform: map is the fixed visualization frame in Foxglove -->
+	<!-- Transform chain: map -> camera_init (FAST-LIVO2's world frame) -> body -> livox_frame -->
+	<node pkg="tf" type="static_transform_publisher" name="map_to_camera_init"
+		args="0 0 0 0 0 0 map camera_init 100" />
+
+	<!-- Static transform: aft_mapped (FAST-LIVO2's body frame) to livox_frame (sensor frame) -->
+	<!-- Using identity transform as FAST-LIVO2 already handles the IMU-LiDAR extrinsics internally -->
+	<node pkg="tf" type="static_transform_publisher" name="aft_mapped_to_livox"
+		args="0 0 0 0 0 0 aft_mapped livox_frame 100" />
+
 	<group if="$(arg rviz)">
 		<node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz" args="-d $(find fast_livo)/rviz_cfg/fast_livo2.rviz" />
 	</group>
 	
-	<node pkg="image_transport" type="republish" name="republish" args="compressed in:=/left_camera/image raw out:=/left_camera/image" output="screen" respawn="true"/>
+	<!-- Disabled camera republisher for lidar-only mode -->
+	<!-- <node pkg="image_transport" type="republish" name="republish" args="compressed in:=/left_camera/image raw out:=/left_camera/image" output="screen" respawn="true"/> -->
 
-launch-prefix="gdb -ex run --args"
-launch-prefix="valgrind --leak-check=full"
 </launch> 	

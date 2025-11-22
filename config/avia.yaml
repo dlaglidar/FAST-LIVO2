@@ -2,7 +2,7 @@ common:
   img_topic: "/left_camera/image"
   lid_topic: "/livox/lidar"
   imu_topic: "/livox/imu"
-  img_en: 1
+  img_en: 0
   lidar_en: 1
   ros_driver_bug_fix: false
 
@@ -41,8 +41,8 @@ vio:
 imu:
   imu_en: true
   imu_int_frame: 30
-  acc_cov: 0.5 # 0.2
-  gyr_cov: 0.3 # 0.5
+  acc_cov: 0.2 # Lower = trust IMU more for better odometry
+  gyr_cov: 0.1 # Lower = trust IMU more for better odometry
   b_acc_cov: 0.0001 # 0.1
   b_gyr_cov: 0.0001 # 0.1
 
@@ -63,7 +63,7 @@ local_map:
 
 uav:
   imu_rate_odom: false
-  gravity_align_en: false
+  gravity_align_en: true  # Enable gravity alignment to reduce drift
 
 publish:
   dense_map_en: true
