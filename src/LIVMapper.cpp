@@ -11,6 +11,7 @@ which is included as part of this source code package.
 */
 
 #include "LIVMapper.h"
+#include <pcl/kdtree/kdtree_flann.h>
 
 LIVMapper::LIVMapper(ros::NodeHandle &nh)
     : extT(0, 0, 0),
@@ -1142,18 +1143,27 @@ void LIVMapper::publish_frame_world(const ros::Publisher &pubLaserCloudFullRes, 
       laserCloudWorldRGB->reserve(size);
       // double inv_expo = _state.inv_expo_time;
       cv::Mat img_rgb = vio_manager->img_rgb;
+
+      // Two-pass approach: first collect in-FOV points, then interpolate out-of-FOV points
+      std::vector<PointTypeRGB> temp_points;
+      std::vector<bool> has_color;
+      temp_points.reserve(size);
+      has_color.reserve(size);
+
+      // First pass: collect all points and determine which have real colors
       for (size_t i = 0; i < size; i++)
       {
+        V3D p_w(pcl_wait_pub->points[i].x, pcl_wait_pub->points[i].y, pcl_wait_pub->points[i].z);
+        V3D pf(vio_manager->new_frame_->w2f(p_w));
+        if (pf[2] < 0 || pf.norm() <= blind_rgb_points) continue;
+
+        V2D pc(vio_manager->new_frame_->w2c(p_w));
+        bool in_fov = vio_manager->new_frame_->cam_->isInFrame(pc.cast<int>(), 3);
+
         PointTypeRGB pointRGB;
         pointRGB.x = pcl_wait_pub->points[i].x;
         pointRGB.y = pcl_wait_pub->points[i].y;
         pointRGB.z = pcl_wait_pub->points[i].z;
-
-        V3D p_w(pcl_wait_pub->points[i].x, pcl_wait_pub->points[i].y, pcl_wait_pub->points[i].z);
-        V3D pf(vio_manager->new_frame_->w2f(p_w)); if (pf[2] < 0) continue;
-        V2D pc(vio_manager->new_frame_->w2c(p_w));
-
-        bool in_fov = vio_manager->new_frame_->cam_->isInFrame(pc.cast<int>(), 3);
 
         if (in_fov)
         {
@@ -1162,17 +1172,107 @@ void LIVMapper::publish_frame_world(const ros::Publisher &pubLaserCloudFullRes, 
           pointRGB.r = pixel[2];
           pointRGB.g = pixel[1];
           pointRGB.b = pixel[0];
+          has_color.push_back(true);
         }
         else
         {
-          // Point is outside camera FOV - use lime green color
-          pointRGB.r = 50;
-          pointRGB.g = 205;
-          pointRGB.b = 50;
+          // Temporarily mark as needing color interpolation
+          pointRGB.r = 0;
+          pointRGB.g = 0;
+          pointRGB.b = 0;
+          has_color.push_back(false);
         }
 
-        // Add all points (both in and out of FOV) to the point cloud
-        if (pf.norm() > blind_rgb_points) laserCloudWorldRGB->push_back(pointRGB);
+        temp_points.push_back(pointRGB);
+      }
+
+      // Second pass: interpolate colors for out-of-FOV points using k-nearest neighbors
+      const int k_neighbors = 5;  // Number of neighbors to use for interpolation
+
+      // Build a point cloud of colored points for KdTree search
+      pcl::PointCloud<PointTypeRGB>::Ptr colored_points(new pcl::PointCloud<PointTypeRGB>());
+      std::vector<size_t> colored_indices;
+
+      for (size_t i = 0; i < temp_points.size(); i++)
+      {
+        if (has_color[i])
+        {
+          colored_points->push_back(temp_points[i]);
+          colored_indices.push_back(i);
+        }
+      }
+
+      // Only perform interpolation if we have colored points
+      if (colored_points->size() > 0)
+      {
+        // Build KdTree for efficient nearest neighbor search
+        pcl::KdTreeFLANN<PointTypeRGB> kdtree;
+        kdtree.setInputCloud(colored_points);
+
+        // Interpolate colors for out-of-FOV points
+        for (size_t i = 0; i < temp_points.size(); i++)
+        {
+          if (!has_color[i])
+          {
+            std::vector<int> k_indices(k_neighbors);
+            std::vector<float> k_sqr_distances(k_neighbors);
+
+            // Find k nearest colored neighbors
+            int found = kdtree.nearestKSearch(temp_points[i], k_neighbors, k_indices, k_sqr_distances);
+
+            if (found > 0)
+            {
+              // Weighted average based on inverse distance
+              float total_weight = 0.0f;
+              float weighted_r = 0.0f, weighted_g = 0.0f, weighted_b = 0.0f;
+
+              for (int n = 0; n < found; n++)
+              {
+                float dist = k_sqr_distances[n];  // squared distance
+
+                // Use inverse distance weighting (add small epsilon to avoid division by zero)
+                float weight = 1.0f / (dist + 1e-6f);
+                total_weight += weight;
+
+                const PointTypeRGB& neighbor = colored_points->points[k_indices[n]];
+                weighted_r += weight * neighbor.r;
+                weighted_g += weight * neighbor.g;
+                weighted_b += weight * neighbor.b;
+              }
+
+              // Normalize by total weight
+              temp_points[i].r = static_cast<uint8_t>(weighted_r / total_weight);
+              temp_points[i].g = static_cast<uint8_t>(weighted_g / total_weight);
+              temp_points[i].b = static_cast<uint8_t>(weighted_b / total_weight);
+            }
+            else
+            {
+              // No colored neighbors found - use lime green as fallback
+              temp_points[i].r = 50;
+              temp_points[i].g = 205;
+              temp_points[i].b = 50;
+            }
+          }
+        }
+      }
+      else
+      {
+        // No colored points at all - mark all out-of-FOV points as lime green
+        for (size_t i = 0; i < temp_points.size(); i++)
+        {
+          if (!has_color[i])
+          {
+            temp_points[i].r = 50;
+            temp_points[i].g = 205;
+            temp_points[i].b = 50;
+          }
+        }
+      }
+
+      // Add all points to the output cloud
+      for (const auto& pt : temp_points)
+      {
+        laserCloudWorldRGB->push_back(pt);
       }
     }
     else
