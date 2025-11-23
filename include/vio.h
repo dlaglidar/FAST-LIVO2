@@ -70,10 +70,11 @@ class VOXEL_POINTS
 public:
   std::vector<VisualPoint *> voxel_points;
   int count;
-  VOXEL_POINTS(int num) : count(num) {}
-  ~VOXEL_POINTS() 
-  { 
-    for (VisualPoint* vp : voxel_points) 
+  bool out_of_fov;  // Flag to mark voxels outside camera FOV
+  VOXEL_POINTS(int num) : count(num), out_of_fov(false) {}
+  ~VOXEL_POINTS()
+  {
+    for (VisualPoint* vp : voxel_points)
     {
       if (vp != nullptr) { delete vp; vp = nullptr; }
     }

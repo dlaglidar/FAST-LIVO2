@@ -52,6 +52,7 @@ public:
   void publish_img_rgb(const image_transport::Publisher &pubImage, VIOManagerPtr vio_manager);
   void publish_frame_world(const ros::Publisher &pubLaserCloudFullRes, VIOManagerPtr vio_manager);
   void publish_visual_sub_map(const ros::Publisher &pubSubVisualMap);
+  void publish_visual_map_colored(const ros::Publisher &pubLaserCloudMap, VIOManagerPtr vio_manager);
   void publish_effect_world(const ros::Publisher &pubLaserCloudEffect, const std::vector<PointToPlane> &ptpl_list);
   void publish_odometry(const ros::Publisher &pubOdomAftMapped);
   void publish_mavros(const ros::Publisher &mavros_pose_publisher);

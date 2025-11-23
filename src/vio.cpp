@@ -479,7 +479,15 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
           }
         }
       }
-      if (!voxel_in_fov) { DeleteKeyList.push_back(position); }
+      // Mark voxel as out of FOV instead of deleting it
+      if (!voxel_in_fov)
+      {
+        corre_voxel->second->out_of_fov = true;
+      }
+      else
+      {
+        corre_voxel->second->out_of_fov = false;
+      }
     }
   }
 
@@ -590,10 +598,11 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
     }
   }
 
-  for (auto &key : DeleteKeyList)
-  {
-    sub_feat_map.erase(key);
-  }
+  // Disabled deletion - voxels are now marked with out_of_fov flag instead
+  // for (auto &key : DeleteKeyList)
+  // {
+  //   sub_feat_map.erase(key);
+  // }
 
   // double t2 = omp_get_wtime();
 

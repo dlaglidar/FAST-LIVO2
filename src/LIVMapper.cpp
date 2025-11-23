@@ -453,6 +453,7 @@ void LIVMapper::handleLIO()
   if (!img_en) publish_frame_world(pubLaserCloudFullRes, vio_manager);
   if (pub_effect_point_en) publish_effect_world(pubLaserCloudEffect, voxelmap_manager->ptpl_list_);
   if (voxelmap_manager->config_setting_.is_pub_plane_map_) voxelmap_manager->pubVoxelMap();
+  publish_visual_map_colored(pubLaserCloudMap, vio_manager);  // Publish visual map with out-of-FOV points in lime green
   publish_path(pubPath);
   publish_mavros(mavros_pose_publisher);
 
@@ -1152,21 +1153,26 @@ void LIVMapper::publish_frame_world(const ros::Publisher &pubLaserCloudFullRes, 
         V3D pf(vio_manager->new_frame_->w2f(p_w)); if (pf[2] < 0) continue;
         V2D pc(vio_manager->new_frame_->w2c(p_w));
 
-        if (vio_manager->new_frame_->cam_->isInFrame(pc.cast<int>(), 3)) // 100
+        bool in_fov = vio_manager->new_frame_->cam_->isInFrame(pc.cast<int>(), 3);
+
+        if (in_fov)
         {
+          // Point is in camera FOV - use camera color
           V3F pixel = vio_manager->getInterpolatedPixel(img_rgb, pc);
           pointRGB.r = pixel[2];
           pointRGB.g = pixel[1];
           pointRGB.b = pixel[0];
-          // pointRGB.r = pixel[2] * inv_expo; pointRGB.g = pixel[1] * inv_expo; pointRGB.b = pixel[0] * inv_expo;
-          // if (pointRGB.r > 255) pointRGB.r = 255;
-          // else if (pointRGB.r < 0) pointRGB.r = 0;
-          // if (pointRGB.g > 255) pointRGB.g = 255;
-          // else if (pointRGB.g < 0) pointRGB.g = 0;
-          // if (pointRGB.b > 255) pointRGB.b = 255;
-          // else if (pointRGB.b < 0) pointRGB.b = 0;
-          if (pf.norm() > blind_rgb_points) laserCloudWorldRGB->push_back(pointRGB);
         }
+        else
+        {
+          // Point is outside camera FOV - use lime green color
+          pointRGB.r = 50;
+          pointRGB.g = 205;
+          pointRGB.b = 50;
+        }
+
+        // Add all points (both in and out of FOV) to the point cloud
+        if (pf.norm() > blind_rgb_points) laserCloudWorldRGB->push_back(pointRGB);
       }
     }
     else
@@ -1251,6 +1257,62 @@ void LIVMapper::publish_visual_sub_map(const ros::Publisher &pubSubVisualMap)
     laserCloudmsg.header.stamp = ros::Time::now();
     laserCloudmsg.header.frame_id = "camera_init";
     pubSubVisualMap.publish(laserCloudmsg);
+  }
+}
+
+void LIVMapper::publish_visual_map_colored(const ros::Publisher &pubLaserCloudMap, VIOManagerPtr vio_manager)
+{
+  // Create RGB point cloud to visualize feat_map with out-of-FOV points in lime green
+  pcl::PointCloud<PointTypeRGB>::Ptr coloredMap(new pcl::PointCloud<PointTypeRGB>());
+
+  // Iterate through all voxels in feat_map
+  for (auto &iter : vio_manager->feat_map)
+  {
+    VOXEL_POINTS *voxel = iter.second;
+    if (voxel == nullptr) continue;
+
+    // Determine color based on out_of_fov flag
+    uint8_t r, g, b;
+    if (voxel->out_of_fov)
+    {
+      // Lime green color (RGB: 50, 205, 50)
+      r = 50;
+      g = 205;
+      b = 50;
+    }
+    else
+    {
+      // White color for points in FOV
+      r = 255;
+      g = 255;
+      b = 255;
+    }
+
+    // Add all points in this voxel
+    for (VisualPoint *pt : voxel->voxel_points)
+    {
+      if (pt == nullptr) continue;
+
+      PointTypeRGB pointRGB;
+      pointRGB.x = pt->pos_[0];
+      pointRGB.y = pt->pos_[1];
+      pointRGB.z = pt->pos_[2];
+      pointRGB.r = r;
+      pointRGB.g = g;
+      pointRGB.b = b;
+
+      coloredMap->push_back(pointRGB);
+    }
+  }
+
+  // Publish the colored map
+  if (coloredMap->size() > 0)
+  {
+    sensor_msgs::PointCloud2 mapMsg;
+    pcl::toROSMsg(*coloredMap, mapMsg);
+    mapMsg.header.stamp = ros::Time::now();
+    mapMsg.header.frame_id = "camera_init";
+    pubLaserCloudMap.publish(mapMsg);
   }
 }
 
